@@ -10,7 +10,7 @@ lines(spline(x,y))
 
 
 ## Added change 1
-## Added change 1 xyz
+## Added change 1 ABC
 
 
 ## Added 2nd change to commit
