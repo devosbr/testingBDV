@@ -8,6 +8,10 @@ y<-x*sin(x)
 plot(x,y)
 lines(spline(x,y)) 
 
+a<-x*cos(x)
+plot(x,a)
+lines(spline(x,a)) 
+
 
 ## Added change 1
 ## Added change 1 abc
