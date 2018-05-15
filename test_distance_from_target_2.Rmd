@@ -1,0 +1,2118 @@
+---
+title: "Test distance from target en opties voor normering i.k.v. HabNorm"
+author: "Hans Van Calster"
+date: "3 april 2018"
+output: html_document
+---
+
+<!--
+Distance-from-target
+
+- distance berekenen voor andere subtypes
+- index voor enkel criterium vegetatie 
+- globale index
+- eventueel indicatoren die niet variëren eruit?
+
+
+VOOR JE DEZE Rmd KNIT:
+https://csgillespie.github.io/efficientR/r-startup.html
+user_renviron = path.expand(file.path("~", ".Renviron"))
+if(!file.exists(user_renviron)) # check to see if the file already exists
+  file.create(user_renviron)
+file.edit(user_renviron) # open with another text editor if this fails
+R_MAX_NUM_DLLs = 1000 #schrijf deze tekst in user_renviron en sla op
+-->
+
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE,
+               cache = TRUE, 
+               autodep = TRUE,
+               cache.lazy = FALSE)
+library(tidyverse)
+library(readxl)
+#library(LSVI)
+library(brms)
+library(plotly)
+Sys.setenv(R_MAX_NUM_DLLS = 1000)
+```
+
+```{r}
+path_to_data <- paste0(rprojroot::find_rstudio_root_file(), "/data/")
+opnamen_ontwikkelingsgraad <- 
+  read_excel(path = paste0(path_to_data, "AbiotischBereik_Ontwikkelingsgraad.xlsx"),
+             sheet = "tbl_SPOCHabitat_laatste")
+
+#snakecase::to_any_case(names(opnamen_ontwikkelingsgraad)) %>% dput()
+names(opnamen_ontwikkelingsgraad) <- c("spoc", "habitattype", "code_opname", "vegetatietype_associa", 
+"kenmerkendheid", "rang", "ontwikkeling", "aandeel_sleutelsoort", 
+"klasse_sleutelsoorten_lsvi_3", "klasse_sleutelsoorten", "cumul_ontwikkeling_lsvi_3", 
+"cumul_ontwikkeling")
+```
+
+
+```{r results="hide", message=FALSE}
+csv_in_data <- list.files(path = path_to_data, pattern = "csv")
+path_csv_in_data <- paste0(path_to_data, csv_in_data)
+path_csv_in_data <- setNames(path_csv_in_data, 
+         make.names(gsub("*.csv$", "", csv_in_data)))
+list2env(
+  lapply(path_csv_in_data, 
+         read_csv, 
+         guess_max = 50000), 
+  envir = .GlobalEnv)
+```
+
+
+```{r eval = FALSE}
+lsvi_6230_vereisten <- geefInvoervereisten(Habitattype = "6230", 
+                                           Versie = "Versie 3", 
+                                           Kwaliteitsniveau = "1")
+lsvi_6230_soortenlijst <- geefSoortenlijst(Habitattype = "6230", 
+                                           Versie = "Versie 3")
+
+#snakecase::to_any_case(names(lsvi_6230_soortenlijst)) %>% dput()
+names(lsvi_6230_soortenlijst) <- c("versie", "habitattype", "habitatsubtype", "criterium", "indicator", 
+"indicator_habitat_id", "soortengroep_id", "indicator_beoordeling_id", 
+"soortensubgroep_id", "omschrijving", "wet_naam", "ned_naam", 
+"nbn_taxon_version_key", "taxontype", "wet_naam_kort")
+
+#snakecase::to_any_case(names(lsvi_6230_vereisten)) %>% dput()
+names(lsvi_6230_vereisten) <- c("versie", "habitattype", "habitatsubtype", "criterium", "indicator", 
+"beoordeling", "kwaliteitsniveau", "beoordeling_id", "combinatie", 
+"voorwaarde_id", "voorwaarde", "extra_bewerking", "referentiewaarde", 
+"operator", "analyse_variabele", "eenheid", "type_variabele", 
+"invoertype", "invoerwaarde", "soortengroep_id", "soortengroep_naam", 
+"studiegroepnaam", "studielijstnaam", "studiewaarde", "sub_analyse_variabele", 
+"sub_eenheid", "type_sub_variabele", "sub_referentiewaarde", 
+"sub_operator", "sub_invoertype", "sub_invoerwaarde")
+
+
+#write_csv(lsvi_6230_soortenlijst, path = paste0(path_to_data, "lsvi_6230_soortenlijst.csv"))
+#write_csv(lsvi_6230_vereisten, path = paste0(path_to_data, "lsvi_6230_vereisten.csv"))
+
+```
+
+
+
+
+```{r eval = FALSE, echo = FALSE}
+#Een opsomming van de te analyseren opnamen met opgave van het aanwezige habitattype (= het habitattype volgens welke criteria de beoordeling moet gebeuren). Deze info moet doorgegeven worden in de vorm van een dataframe met minimum de velden ID en Habitattype, waarbij ID een groeperende variabele is voor een opname (plaats en tijdstip). Habitattype moet overeenkomen met de naamgeving in de LSVI-databank (op te zoeken door geefUniekeWaarden("Habitattype", "Code")). Eventuele extra velden zullen overgenomen worden bij de uitvoer.
+Data_habitat <- subset_6230 %>%
+  filter(code_opname == "IV2013091810114291") %>%
+  select(Habitattype, code_opname) %>%
+  rename(ID = code_opname)
+
+#Gegevens van soorten en kenmerken en hun bedekking (m.a.w. enkel kenmerken waarvan een bedekking gemeten is, horen in deze tabel). Deze dataframe moet de velden ID, Kenmerk, TypeKenmerk, Waarde, Type, Invoertype en Eenheid bevatten, waarbij ID de groeperende variabele voor een opname is die ook bij Data_habitat opgegeven is. Kenmerk bevat een soortnaam of een naam die voorkomt in de lijst gegenereerd door geefUniekeWaarden("LijstItem", "Waarde") en TypeKenmerk geeft een beschrijving voor dat kenmerk: 'studiegroep', 'soort_Latijn', 'soort_NL' of 'soort_NBN'. Waarde is de geobserveerde bedekking en Type het soort variabele dat voor de bedekking gebruikt is (zie geefUniekeWaarden("TypeVariabele", "Naam") voor de mogelijke waarden). Ingeval van een categorische variabele moet bij Invoertype de naam van de lijst opgegeven worden welke schaal gebruikt is (zie geefUniekeWaarden("Lijst", "Naam") voor alle mogelijkheden).
+Data_soortenKenmerken <- fv_vegopn_6230 %>%
+  filter(recording_givid == "IV2013091810114291") %>%
+  select(recording_givid, wet_naam, pct_value) %>%
+  rename(ID = recording_givid, 
+         Kenmerk = wet_naam,
+         Waarde = pct_value) %>%
+  mutate(TypeKenmerk = "soort_Latijn",
+         Type = "Percentage",
+         Invoertype = NA,
+         Eenheid = "%")
+  
+
+#Gegevens over de opgemeten indicatoren in de vorm van een data.frame met velden ID, criterium, indicator, Voorwaarde, Waarde, Type, Invoertype en Eenheid, waarbij ID de groeperende variabele voor een opname is die ook bij Data_habitat opgegeven is. criterium, indicator en Voorwaarde moeten overeenkomen met de waarde in de databank (op te zoeken via de functie geefInvoervereisten()). Waarde is de waarde die voor die voorwaarde geobserveerd of gemeten is en Type het soort variabele (zie geefUniekeWaarden("TypeVariabele", "Naam") voor de mogelijke waarden). Ingeval van een categorische variabele moet bij Invoertype de naam van de lijst opgegeven worden waaruit deze waarde komt (bv. welke schaal gebruikt is, zie geefUniekeWaarden("Lijst", "Naam") voor alle mogelijkheden).
+
+Data_voorwaarden <- geefInvoervereisten(Habitattype = "6230", 
+                                 Versie = "Versie 3", Kwaliteitsniveau = "1") %>%
+               select(voorwaarde_id, criterium, indicator, Voorwaarde, TypeVariabele,
+                      Invoertype, Eenheid) %>%
+               rename(ID = voorwaarde_id,
+                      Type = TypeVariabele) %>%
+               mutate(WaardeMin = ifelse(indicator == "verbossing", 0, NA), 
+                      WaardeMax = ifelse(indicator == "verbossing", 0, NA),
+                      Eenheid = NA,
+                      ID = as.character(ID),
+                      Type = ifelse(is.na(Type), "Decimaal getal", Type),
+                      Waarde = ifelse(indicator == "verbossing", 0, NA)) %>%
+  filter(!is.na(ID)) %>%
+               tbl_df()
+```
+
+
+```{r eval = FALSE, echo = FALSE}
+invoerctrl <- invoercontroleData_soortenKenmerken(Data_soortenKenmerken = Data_soortenKenmerken, 
+                                    ConnectieLSVIhabitats = ConnectiePool
+                                    , LIJST = geefVertaallijst(ConnectieLSVIhabitats = ConnectiePool))
+
+lsvi_6230_basis <- berekenLSVIbasis(Versie = "Versie 3", Kwaliteitsniveau = "1",
+                                    Data_habitat = Data_habitat, 
+                                    Data_voorwaarden = Data_voorwaarden,
+                                    Data_soortenKenmerken = Data_soortenKenmerken) 
+
+
+
+
+geefInvoervereisten(Habitattype = "6230", Versie = "Versie 3", Kwaliteitsniveau = "1") %>%
+  select(voorwaarde_id, criterium, indicator, Voorwaarde)
+  filter(voorwaarde_id == 1765)
+
+berekenVoorwaarde(OpnameID =    Data_habitat$ID,
+                  voorwaarde_id =                 1765,
+              Kenmerken = invoerctrl ,
+              ConnectieLSVIhabitats = ConnectiePool,
+              LIJST = geefVertaallijst(ConnectieLSVIhabitats = ConnectiePool)
+            )
+```
+
+
+# Distance from target indices
+
+## Berekening ontwikkelingsgraad 
+
+Verklaring variabelen	
+
+- **Kenmerkendheid**:	Driedelige schaal van de mate dat een vegetatietype (Ned. Typologie) als kenmerkend voor het habitattype wordt beschouwd: 
+    - 1= zeer kenmerkend 
+    - 3: weinig kenmerkend
+- **Rang**:	vierdelige schaal met rangorde van de typering met Associa: 
+    - rang 1: beste overeenkomst met referentieopname(set) van Associa,
+    - speciaal geval 0: expertoordeel voor 9130 (type dat niet in Nederland voorkomt)
+- **Ontwikkeling**
+    - 7- (Kenmerkendheid + Rang), 
+    - normaal in bereik 1-5 (uitgezonderd 9130: 1-6)
+- **AandeelSleutelsoort**:	Procentueel aandeel van sleutelsoorten
+- **KlasseSleutelsoortenLSVI3**
+    - 0% van het aantal sleutelsoorten LSVI3 voor dat HT= 0; 
+    - 1-5% = 1; 
+    - 6-10% = 2; 
+    - 11-15% = 3;  
+    - 16-20% = 4; 
+    - >20% = 5
+- **cumul_ontwikkeling_lsvi_3**:	gemiddelde van Ontwikkeling en KlasseSleutelsoortenLSVI3
+
+```{r}
+opnamen_ontwikkelingsgraad %>%
+  count(habitattype) %>%
+  arrange(-n) %>%
+  kable()
+```
+
+```{r }
+fv_habitat <- fv_habitat %>%
+  filter(!is.na(habitattype)) %>%
+  mutate(klasse_sleutelsoorten_LSVI3 = 
+           case_when(aandeel_sleutelsoorten == 0 ~ 0,
+                     between(aandeel_sleutelsoorten,
+                             0 + .Machine$double.eps,
+                             5) ~ 1,
+                     between(aandeel_sleutelsoorten,
+                             5 + .Machine$double.eps,
+                             10) ~ 2,
+                     between(aandeel_sleutelsoorten,
+                             10 + .Machine$double.eps,
+                             15) ~ 3,
+                     between(aandeel_sleutelsoorten,
+                             15 + .Machine$double.eps,
+                             20) ~ 4,
+                     aandeel_sleutelsoorten > 20 ~ 5),
+         mean_ontwgr_sleutelsoorten = (klasse_sleutelsoorten_LSVI3 + ontwikkelingsgraad)/2)
+```
+
+
+```{r}
+fv_habitat %>%
+  select(spoc, mean_ontwgr_sleutelsoorten) %>%
+  full_join(opnamen_ontwikkelingsgraad %>%
+              select(spoc, cumul_ontwikkeling_lsvi_3),
+            by = c("spoc")) %>%
+  ggplot(aes(x = mean_ontwgr_sleutelsoorten, y = cumul_ontwikkeling_lsvi_3)) + 
+  stat_sum() + 
+  geom_smooth(method = "lm") + 
+  geom_abline(slope = 1, intercept = 0)
+```
+
+
+
+
+## Berekening distance-from-target
+
+We bouwen hier verder op de klassieke LSVI-bepaling van een gebied (Paelinckx et al., 2015), maar stellen een verfijning voor om een meer continue kwaliteitsmaat te bekomen. De klassieke aanpak is gebaseerd op het ‘one-out-all-out’ principe waarbij de beoordeling ongunstig is van zodra één van de indicatoren ongunstig scoort. Hierdoor weten we bij een ongunstige situatie niet of de score voor één indicator net onder de grens voor een gunstige staat van instandhouding ligt, dan wel of er meerdere indicatoren niet goed scoren. 
+
+Daarom hebben we geïnspireerd op een alternatief ontwikkeld om de afstanden te bepalen tot het doelbereik. 
+
+- Eerst berekenen we het verschil tussen de meetwaarde en de grenswaarde (eventueel vermenigvuldigd met -1 om negatieve indicatoren dezelfde zin te geven als positieve indicatoren). 
+- Vervolgens normeren we het bekomen verschil door te delen door het bereik van de zone (gunstig/ongunstig) waarin de meetwaarde valt. Hierdoor ligt de schaal van alle scores tussen -1 en 1 en krijgen alle criteria eenzelfde gewicht mee, ongeacht de oorspronkelijke schaal. 
+- Tenslotte berekenen we een index als een gemiddelde waarde van de gemiddelde score van de indicatoren per criteriumgroep. Voor de berekening van het gemiddelde verkennen we drie pistes: het rekenkundig gemiddelde, het meetkundig gemiddelde, het harmonisch gemiddelde. Daarnaast berekenen we ook een index via het minimum van de scores. Deze vier gevallen zijn speciale gevallen van het veralgemeend gemiddelde of wortelgemiddelde ($M_r$):
+
+$$M_r(x_1, x_2, \dots, x_n) = \bigg(\frac{1}{n}\sum_{i = 1}^nx_i^r\bigg)^\frac{1}{r} $$
+Voor $M_1$ is dit het rekenkundig gemiddelde. $M_0$ is gedefinieerd als het meetkundig gemiddelde (limietgeval voor $r \to 0$):
+
+$$M_0 = \sqrt[n]{\prod_{i = 1}^n x_i}$$ 
+$M_{-1}$ is het harmonisch gemiddelde:
+
+$$M_{-1} = \frac{n}{\sum_{i = 1}^n\frac{1}{x_i}} $$
+
+$$M_{-\infty} = \text{min}(x_1, x_2, \dots, x_n)$$
+
+Dus, voor een bepaalde vegetatie-opname $i$, berekenen we voor de indicatoren $j$ uit criteriumgroep $k$: 
+
+$$\text{verschil}_{i,j(k)}=(\text{meetwaarde}_{i,j(k)} - \text{grenswaarde}_{i,j(k)}) \times \text{teken}_{i,j(k)}$$
+$$\text{verschil}_{i,j(k)} > 0: s_{i,j(k)} =  \frac{\text{verschil}_{i,j(k)}}{\text{bereik gunstig}_{i,j(k)}}$$
+$$\text{verschil}_{i,j(k)} \leq 0: s_{i,j(k)} =  \frac{\text{verschil}_{i,j(k)}}{\text{bereik ongunstig}_{i,j(k)}}$$
+$$\text{index}_{r,i} = M_{r,i}\bigg(M_{r,i,1}(s_{i,1}, s_{i,2},\dots,  s_{i,p_1}), M_{r,i,2}(s_{i,1}, s_{i,2},\dots,  s_{i,p_2}), \dots, M_{r,i,q}(s_{i,1}, s_{i,2},\dots,  s_{i,p_q})\bigg)$$ 
+
+
+De index kwantificeert de afstand tot het doel. De waarde ligt tussen -1 (heel ongunstig) en 1 (heel gunstig) en is een maat voor de afstand tot de grenswaarde (0). Een positieve index wijst op gunstige situatie en een negatief resultaat op een ongunstige toestand. Voor de berekening van het meetkundig gemiddelde en het harmonisch gemiddelde, worden de scores tijdelijk herschaald tussen 0 en 1 en achteraf terug naar waarden tussen -1 en +1 gebracht. Voor deze twee types gemiddelden (en het minimum) geldt dat van zodra één indicator de slechtst mogelijke score heeft (-1) (bv geen enkele sleutelsoort of 100% vergrassing), ook de index -1 zal zijn. Dit lijkt een wenselijke eigenschap voor een index te zijn, waardoor het rekenkundig gemiddelde wellicht geen geschikte manier is om de index te berekenen. 
+
+Voor de verschillende types van indices geldt:
+
+$$\text{index}_{1,i} \geq \text{index}_{0,i} \geq \text{index}_{-1,i} \geq \text{index}_{-\infty,i}$$
+
+Voor $\text{index}_{-\infty,i}$ (het minimum van de scores) geldt bovendien dat de set van opnamen waarvoor de index een waarde groter dan gelijk aan nul, respectievelijk, kleiner dan nul heeft, volledig overeenkomt met een *one-out-all-out* klassificatie in gunstig, respectievelijk, ongunstig.
+
+Voorlopig is enkel 6230_hmo, 4030 en 9110 in de LSVI databank in orde. Daarom voorlopig enkel de test voor 6230_hmo. Ook is de soortenlijst voor de indicator verbossing nog niet in orde (in code hieronder heb ik dit omzeild door de totale bedekking van de struiklaag en boomlaag te nemen, maar deze was altijd 0 in de 6230_hmo dataset).
+
+Voor de berekening van het (on)gunstig bereik werken we met het theoretisch maximum van een bepaalde indicator. Voor indicatoren waarbij de bedekking moet berekend worden, is dit 100%. Voor aantallen is dit het maximaal aantal (de lengte van de lijst van unieke waarden). In het geval van de indicator *aantal sleutelsoorten* betekent dit dat - zeker voor kleine proefvlakgroottes - een score van +1 niet kan gehaald worden. Het geobserveerd maximum in de dataset = 10. Het theoretisch maximum voor aantal sleutelsoorten van type 6230_hmo = 28.  Zelfs op habitatvlekniveau (het niveau waarvoor de LSVI grenswaarden gelden) komt dit wellicht niet voor. Eventueel kan voor deze indicator dan ook een afwijking van de regel verkozen worden. Mogelijke opties zijn:
+
+- Een kleinere waarde dan het theoretisch maximum gebruiken
+    - geobserveerd maximum (te vermijden vermits datasetafhankelijk)
+    - overwegingen op basis van soortsoppervlakterelaties suggereren de waarde te delen door 3 of 4 (power curve $s = cA^z$ met $z = 0.2$ (uit literatuur): $s_1 / s_2 = (10 m^2)^0.2 / (10000 m^2)^0.2  = 0.25$)
+- Ook de grenswaarde (=4) aan te passen? Er zijn in de gehele 6230 dataset (alle subtypes) slechts 3 opname met 0 sleutelsoorten van type hmo
+- De indicator niet meenemen in de berekening van de index
+    
+
+
+
+```{r}
+lsvi_vereisten_6230_hmo <- lsvi_6230_vereisten %>% 
+  tbl_df() %>%
+  select(habitatsubtype, criterium, indicator, beoordeling, voorwaarde_id, 
+         voorwaarde, referentiewaarde, operator, soortengroep_id) %>%
+  filter(habitatsubtype == "6230_hmo", !is.na(indicator)) %>%
+  mutate(bereik_gunstig = ifelse(operator == "<=" & voorwaarde != "aantal",
+                                as.numeric(referentiewaarde),
+                                100 - as.numeric(referentiewaarde)),
+         bereik_gunstig = ifelse(voorwaarde == "aantal",
+                                28 - as.numeric(referentiewaarde), # to do change to calculatd max number of sleutelsoorten
+                                bereik_gunstig),
+         bereik_ongunstig = ifelse(voorwaarde != "aantal",
+                                  100 - bereik_gunstig,
+                                  as.numeric(referentiewaarde)))
+```
+
+
+
+```{r}
+lsvi_vereisten_6230_hmo %>% 
+  select(habitatsubtype, criterium, indicator, referentiewaarde, operator, bereik_gunstig, bereik_ongunstig) %>%
+  kable(caption = "LSVI vereisten voor habitattype 6230_hmo en de breedte van het biotisch ongunstige en gunstige bereik.")
+```
+
+## Toepassing op 6230_hmo
+
+
+
+```{r}
+lsvi_soorten_6230_hmo <- lsvi_6230_soortenlijst %>%
+  tbl_df() %>%
+  filter(habitatsubtype == "6230_hmo") %>%
+  select(habitatsubtype, soortengroep_id, wet_naam, nbn_taxon_version_key)
+```
+
+
+```{r}
+subset_6230_hmo <- opnamen_ontwikkelingsgraad %>%
+  filter(grepl(pattern = "6230_hmo", x = .$habitattype))
+```
+
+
+```{r}
+fv_vegopn_6230_hmo <-
+  fv_vegopn %>%
+  inner_join(subset_6230_hmo %>% 
+              select(spoc, code_opname) %>%
+              rename(recording_givid = code_opname),
+            by = c("recording_givid"))
+```
+
+
+
+```{r}
+lsvi_soorten_6230_hmo <- lsvi_soorten_6230_hmo %>%
+  select(wet_naam, soortengroep_id) %>%
+  distinct() %>%
+  filter(!is.na(wet_naam))
+
+lsvi_soorten_6230_hmo %>%
+  filter(wet_naam == "Festuca rubra L.")
+```
+
+
+```{r eval = FALSE}
+fv_vegopn_6230_hmo %>%
+  select(wet_naam) %>%
+  distinct() %>% 
+  anti_join(lsvi_soorten_6230_hmo) %>%
+  fuzzyjoin::stringdist_left_join(lsvi_soorten_6230_hmo %>%
+                                    mutate(wet_naam =
+                                             stringi::stri_enc_toutf8(
+                                               wet_naam)),
+                                  by = "wet_naam",
+                                  method = "lv",
+                                  distance_col = "stringdistance",
+                                  max_dist = 5)
+```
+
+
+```{r}
+deelresultaat1 <- fv_vegopn_6230_hmo %>%
+  # in deze stap worden een paar extra rijen gemaakt, omdat Festuca rubra in twee soortengroepen staat
+  left_join(lsvi_soorten_6230_hmo,
+            by = "wet_naam") %>%
+  left_join(lsvi_vereisten_6230_hmo %>%
+              select(criterium, indicator, soortengroep_id) %>%
+              filter(!is.na(soortengroep_id)),
+                     by = "soortengroep_id") %>%
+  filter(!is.na(soortengroep_id)) %>%
+  group_by(recording_givid,  spoc, omschrijving_layer, soortengroep_id, indicator) %>%
+  summarise(aantal = n(),
+            bedekking = 100 - 100*exp(sum(log(1 - pct_value/100)))) %>%
+  ungroup() %>%
+  gather(key = "voorwaarde", value = "waarde", -recording_givid, -spoc, -omschrijving_layer, 
+         -soortengroep_id, -indicator)
+
+```
+
+```{r}
+deelresultaat2 <- fv_vegopn_6230_hmo %>%
+  filter(omschrijving_layer == "Moslaag") %>%
+  select(recording_givid, spoc, cover_code) %>%
+  distinct() %>%
+  mutate(waarde = as.numeric(cover_code),
+         voorwaarde = "bedekking",
+         indicator = "vermossing") %>%
+  select(-cover_code)
+  
+```
+
+```{r}
+deelresultaat3 <- fv_vegopn_6230_hmo %>%
+  filter(grepl(pattern = "Rubus", .$wet_naam)) %>%
+  group_by(recording_givid, spoc, omschrijving_layer) %>%
+  summarise(waarde = 100 - 100*exp(sum(log(1 - pct_value/100))),
+            voorwaarde = "bedekking",
+            indicator = "verbraming") %>%
+  ungroup()
+```
+
+```{r}
+deelresultaat4 <- fv_vegopn_6230_hmo %>%
+  filter(omschrijving_layer %in% c("Struiklaag", "Boomlaag")) %>%
+  select(recording_givid, spoc, cover_code) %>%
+  distinct() %>%
+  mutate(waarde = as.numeric(cover_code),
+         voorwaarde = "bedekking",
+         indicator = "verbossing") %>%
+  select(-cover_code)
+  
+```
+
+```{r}
+deelresultaten <- bind_rows(deelresultaat1 %>%
+                              inner_join(lsvi_vereisten_6230_hmo), 
+                            deelresultaat2 %>%
+                              inner_join(lsvi_vereisten_6230_hmo),
+                            deelresultaat3 %>%
+                              inner_join(lsvi_vereisten_6230_hmo), 
+                            deelresultaat4 %>%
+                              inner_join(lsvi_vereisten_6230_hmo))
+```
+
+```{r}
+# alle combinaties van recording_givid en de indicatoren, nullen toevoegen
+deelresultaten <- deelresultaten %>%
+  select(-omschrijving_layer, -soortengroep_id, 
+         -habitatsubtype, -beoordeling) %>%
+  full_join(fv_vegopn_6230_hmo %>%
+              distinct(recording_givid) %>%
+              crossing(lsvi_vereisten_6230_hmo %>%
+                         tbl_df() %>%
+                         select(criterium, indicator, voorwaarde, voorwaarde_id, 
+                                referentiewaarde, operator, bereik_gunstig, 
+                                bereik_ongunstig))) %>%
+  mutate(waarde = ifelse(is.na(waarde), 0, waarde))
+
+
+```
+
+
+```{r}
+dist_from_target_scores <- deelresultaten %>%
+  mutate(teken = ifelse(operator == ">=", 1, -1),
+         verschil = (waarde - as.numeric(referentiewaarde)) * teken,
+         score = ifelse(verschil > 0, 
+                        verschil / bereik_gunstig,
+                        verschil / bereik_ongunstig))
+```
+
+```{r}
+dist_from_target_scores %>%
+  ggplot(aes(x = score)) + 
+  geom_histogram(aes(fill = score > 0)) +
+  facet_wrap(~criterium + indicator)
+```
+
+
+
+```{r}
+dist_from_target_index <- dist_from_target_scores %>%
+  group_by(recording_givid, criterium) %>%
+  mutate(score_01 = (score + 1) / 2) %>%
+  #berekening als gemiddelde van gemiddelde score per criterium
+  summarise(index_p0 = prod(score_01)^(1/n()),
+            index_pmin1 = 1/mean(1/score_01),
+            index_p1 = mean(score),
+            index_minimum = min(score)) %>%
+  summarise(index_p0 = prod(index_p0)^(1/n()),
+            index_pmin1 = 1 / mean(1 / index_pmin1),
+            index_p1 = mean(index_p1),
+            index_minimum = min(index_minimum)) %>%
+  mutate(index_p0 = index_p0 * 2 - 1,
+         index_pmin1 = index_pmin1 * 2 - 1)
+```
+
+
+```{r}
+dist_from_target_index %>%
+  gather("welke_index", "indexwaarde", -recording_givid) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(x = indexwaarde)) + 
+  geom_histogram(aes(fill = indexwaarde > 0)) + 
+  facet_wrap(~welke_index)
+```
+
+
+```{r}
+one_out_all_out <- deelresultaten %>%
+  mutate(teken = ifelse(operator == ">=", 1, -1),
+         verschil = (waarde - as.numeric(referentiewaarde)) * teken,
+         score_binair = ifelse(verschil >= 0, 
+                        1,
+                        0)) %>% 
+  group_by(recording_givid) %>%
+  summarise(score_one_out_all_out = ifelse(sum(score_binair)/n() == 1,
+                                           "Gunstig", 
+                                           "Ongunstig"))
+
+```
+
+```{r}
+dist_from_target_index %>%
+  gather("welke_index", "indexwaarde", -recording_givid) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  left_join(opnamen_ontwikkelingsgraad %>%
+              select(code_opname, cumul_ontwikkeling_lsvi_3),
+            by = c("recording_givid" = "code_opname")) %>%
+  left_join(one_out_all_out, 
+            by = "recording_givid") %>%
+  ggplot(aes(x = cumul_ontwikkeling_lsvi_3, y = indexwaarde)) + 
+  geom_jitter(aes(colour = score_one_out_all_out), width = 0.05) + 
+  stat_summary(fun.data = "mean_cl_boot", colour = "red") + 
+  scale_y_continuous(limits = c(-1,1)) + 
+  geom_hline(yintercept = 0) + 
+  facet_wrap(~welke_index)
+```
+
+
+```{r}
+dist_from_target_index %>%
+  gather("welke_index", "indexwaarde", -recording_givid) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  left_join(fv_habitat %>%
+              left_join(fv_vegkop %>%
+                          select(spoc, recording_givid) %>%
+                          distinct(),
+                        by = "spoc") %>%
+              select(recording_givid, mean_ontwgr_sleutelsoorten),
+            by = c("recording_givid")) %>%
+  left_join(one_out_all_out, 
+            by = "recording_givid") %>%
+  ggplot(aes(x = mean_ontwgr_sleutelsoorten, y = indexwaarde)) + 
+  geom_jitter(aes(colour = score_one_out_all_out), width = 0.05) + 
+  stat_summary(fun.data = "mean_cl_boot", colour = "red") +
+  scale_y_continuous(limits = c(-1,1)) + 
+  geom_hline(yintercept = 0) + 
+  facet_wrap(~welke_index)
+```
+
+
+```{r warning=FALSE, message=FALSE}
+dist_from_target_scores %>% 
+  select(recording_givid, indicator, score) %>%
+  spread(indicator, score) %>%
+  left_join(dist_from_target_index,
+            by = "recording_givid") %>%
+  select(-recording_givid) %>%
+  GGally::ggpairs(columns = 1:9,
+                  mapping = aes(size = index_p0), 
+                  lower = list(continuous = GGally::wrap("points",
+                                                         alpha = 0.2)))
+
+  
+```
+
+
+```{r}
+dist_from_target_index %>%
+  gather("type_index", "indexwaarde", starts_with("index")) %>%
+  mutate(type_index = factor(type_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  left_join(one_out_all_out) %>%
+  ggplot(aes(x = score_one_out_all_out, y = indexwaarde)) +
+  geom_point() +
+  geom_hline(yintercept = 0) +
+  facet_wrap(~type_index)
+```
+
+## Toepassing op alle 6230 subtypes
+
+We herberekenen de indexen op alle vegetatie-opnamen die behoren tot 6230 maar nog steeds op basis van de LSVI indicatoren voor 6230_hmo. Dit is een uitbreiding van 39 naar 115 opnamen.
+
+
+```{r}
+subset_6230 <- opnamen_ontwikkelingsgraad %>%
+  filter(grepl(pattern = "6230", x = .$habitattype))
+```
+
+
+```{r}
+fv_vegopn_6230 <-
+  fv_vegopn %>%
+  inner_join(subset_6230 %>% 
+              select(spoc, code_opname, habitattype) %>%
+              rename(recording_givid = code_opname),
+            by = c("recording_givid"))
+```
+
+
+```{r}
+deelresultaat1 <- fv_vegopn_6230 %>%
+  # in deze stap worden een paar extra rijen gemaakt, omdat Festuca rubra in twee soortengroepen staat
+  left_join(lsvi_soorten_6230_hmo,
+            by = "wet_naam") %>%
+  left_join(lsvi_vereisten_6230_hmo %>%
+              select(criterium, indicator, soortengroep_id) %>%
+              filter(!is.na(soortengroep_id)),
+                     by = "soortengroep_id") %>%
+  filter(!is.na(soortengroep_id)) %>%
+  group_by(habitattype, recording_givid,  spoc, omschrijving_layer,
+           soortengroep_id,
+           indicator) %>%
+  summarise(aantal = n(),
+            bedekking = 100 - 100*exp(sum(log(1 - pct_value/100)))) %>%
+  ungroup() %>%
+  gather(key = "voorwaarde", value = "waarde", aantal, bedekking)
+
+```
+
+```{r}
+deelresultaat2 <- fv_vegopn_6230 %>%
+  filter(omschrijving_layer == "Moslaag") %>%
+  select(habitattype, recording_givid, spoc, cover_code) %>%
+  distinct() %>%
+  mutate(waarde = as.numeric(cover_code),
+         voorwaarde = "bedekking",
+         indicator = "vermossing") %>%
+  select(-cover_code)
+  
+```
+
+```{r}
+deelresultaat3 <- fv_vegopn_6230 %>%
+  filter(grepl(pattern = "Rubus", .$wet_naam)) %>%
+  group_by(habitattype, recording_givid, spoc, omschrijving_layer) %>%
+  summarise(waarde = 100 - 100*exp(sum(log(1 - pct_value/100))),
+            voorwaarde = "bedekking",
+            indicator = "verbraming") %>%
+  ungroup()
+```
+
+```{r}
+deelresultaat4 <- fv_vegopn_6230 %>%
+  filter(omschrijving_layer %in% c("Struiklaag", "Boomlaag")) %>%
+  select(habitattype, recording_givid, spoc, cover_code) %>%
+  distinct() %>%
+  mutate(waarde = as.numeric(cover_code),
+         voorwaarde = "bedekking",
+         indicator = "verbossing") %>%
+  select(-cover_code)
+  
+```
+
+```{r}
+deelresultaten_6230 <- bind_rows(deelresultaat1 %>%
+                              inner_join(lsvi_vereisten_6230_hmo), 
+                            deelresultaat2 %>%
+                              inner_join(lsvi_vereisten_6230_hmo),
+                            deelresultaat3 %>%
+                              inner_join(lsvi_vereisten_6230_hmo), 
+                            deelresultaat4 %>%
+                              inner_join(lsvi_vereisten_6230_hmo))
+```
+
+```{r}
+# alle combinaties van recording_givid en de indicatoren, nullen toevoegen
+deelresultaten_6230 <- deelresultaten_6230 %>%
+  select(-omschrijving_layer, -soortengroep_id, 
+         -habitatsubtype, -beoordeling) %>%
+  full_join(fv_vegopn_6230 %>%
+              distinct(habitattype, recording_givid, spoc) %>%
+              crossing(lsvi_vereisten_6230_hmo %>%
+                         tbl_df() %>%
+                         select(criterium, indicator, voorwaarde,
+                                voorwaarde_id, 
+                                referentiewaarde, operator, bereik_gunstig, 
+                                bereik_ongunstig))) %>%
+  mutate(waarde = ifelse(is.na(waarde), 0, waarde))
+```
+
+
+```{r}
+dist_from_target_scores_6230 <- deelresultaten_6230 %>%
+  mutate(teken = ifelse(operator == ">=", 1, -1),
+         verschil = (waarde - as.numeric(referentiewaarde)) * teken,
+         score = ifelse(verschil > 0, 
+                        verschil / bereik_gunstig,
+                        verschil / bereik_ongunstig))
+```
+
+```{r}
+dist_from_target_scores_6230 %>%
+  ggplot(aes(x = score)) + 
+  geom_histogram(aes(fill = habitattype)) +
+  facet_wrap(~criterium + indicator)
+```
+
+```{r}
+dist_from_target_index_6230 <- dist_from_target_scores_6230 %>%
+  group_by(habitattype, recording_givid, spoc, criterium) %>%
+  mutate(score_01 = (score + 1) / 2) %>%
+  #berekening als gemiddelde van gemiddelde score per criterium
+  summarise(index_p0 = prod(score_01)^(1/n()),
+            index_pmin1 = 1/mean(1/score_01),
+            index_p1 = mean(score),
+            index_minimum = min(score)) %>%
+  summarise(index_p0 = prod(index_p0)^(1/n()),
+            index_pmin1 = 1 / mean(1 / index_pmin1),
+            index_p1 = mean(index_p1),
+            index_minimum = min(index_minimum)) %>%
+  mutate(index_p0 = index_p0 * 2 - 1,
+         index_pmin1 = index_pmin1 * 2 - 1)  %>%
+  ungroup()
+#berekening als gemiddelde van gemiddelde score per criterium
+```
+
+
+```{r}
+dist_from_target_index_6230 %>%
+  gather("type_index", "indexwaarde", starts_with("index")) %>%
+  mutate(type_index = factor(type_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(x = indexwaarde)) + 
+  geom_density(aes(colour = habitattype)) + 
+  facet_wrap(~type_index)
+```
+
+
+```{r}
+one_out_all_out_6230 <- deelresultaten_6230 %>%
+  mutate(teken = ifelse(operator == ">=", 1, -1),
+         verschil = (waarde - as.numeric(referentiewaarde)) * teken,
+         score_binair = ifelse(verschil >= 0, 
+                        1,
+                        0)) %>%
+  group_by(habitattype, recording_givid) %>%
+  summarise(score_one_out_all_out = ifelse(sum(score_binair)/n() == 1,
+                                           "Gunstig", 
+                                           "Ongunstig"))
+
+```
+
+Zelfs volgens het one-out-all-out principe zijn er 9 gevallen waarbij 6230_ha gunstig scoort. 
+
+```{r}
+dist_from_target_index_6230 %>%
+  gather("type_index", "indexwaarde", starts_with("index")) %>%
+  mutate(type_index = factor(type_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  left_join(one_out_all_out_6230) %>%
+  ggplot(aes(x = score_one_out_all_out, y = indexwaarde)) +
+  geom_jitter(aes(colour = habitattype), width = 0.2) +
+  geom_hline(yintercept = 0) +
+  facet_wrap(~type_index)
+```
+
+De reden waarom 6230_hn vaak gunstig scoort volgens de op LSVI gebaseerde indexen is dat criteria die gebruikt worden in de graslandsleutel niet voorkomen in de LSVI: bv freatofyten samen frequent aanwezig. De freatofyten zijn voor een stuk een subset van de sleutelsoorten voor hmo. Een extra indicator toevoegen aan LSVI? (bv bedekkingsaandeel van freatofyten in de totale bedekking van sleutelsoorten moet minstens x% bedragen). Of de indicator "bedekking van sleutelsoorten" vervangen door "bedekking van sleutelsoorten, die uniek zijn voor hmo".
+
+
+```{r}
+lsvi_6230_soortenlijst %>%
+  tbl_df() %>%
+  filter(habitatsubtype %in% c("6230_hn", "6230_hmo"),
+         versie == "Versie 3",
+         indicator == "sleutelsoorten") %>%
+  select(habitatsubtype, ned_naam) %>%
+  mutate(value = 1) %>%
+  distinct() %>%
+  spread(habitatsubtype, value) %>%
+  arrange(`6230_hmo`, -`6230_hn`) %>%
+  kable(caption = "Lijst van sleutelsoorten voor 6230_hmo en/of 6230_hn")
+```
+
+
+
+# Opties voor normering
+
+Test voor P.OLSEN, BV (baseverzadiging), pH.pot, FeP.RATIO, NP.RATIO, NC.RATIO, CN.RATIO.
+
+Getest voor index gebaseerd op meetkundig gemiddelde en op harmonisch gemiddelde. Voor de I ~ f(S) kwantielregressie ook de minimum index als response genomen.
+
+Uitgesloten: rekenkundig gemiddelde (wegens te veel geklasseerd als gunstig) en minimum index (wegens te veel geklasseerd als ongunstig).
+
+
+```{r}
+afkortingen <- c("P.OLSEN", "BV", "pH.pot", "FeP.RATIO", "NP.RATIO", "NC.RATIO")
+# er zijn twee recording_givid zonder spoc
+subset_normering_bodem <- fv_bodemlang_grafiek  %>% 
+  filter(afkorting %in% afkortingen) %>%
+  inner_join(dist_from_target_index %>%
+  left_join(fv_habitat %>%
+              left_join(fv_vegkop %>%
+                          select(spoc, recording_givid) %>%
+                          distinct(),
+                        by = "spoc") %>%
+              select(recording_givid, spoc, mean_ontwgr_sleutelsoorten),
+            by = c("recording_givid")))
+```
+
+
+
+```{r eval = FALSE, echo = FALSE}
+lut_drainage <- readxl::read_excel(path = paste0(path_to_data,
+                                                 "Drainageklassen.xlsx"), 
+                  sheet = "platte_tabel")
+
+lut_textuur <- readxl::read_excel(path = paste0(path_to_data,
+                                                "Drainageklassen.xlsx"), 
+                  sheet = "textuurklassen")
+
+lut_draintext <- lut_drainage %>%
+  full_join(lut_textuur)
+
+subset_normering_drainage <- fv_basis %>%
+  select(spoc, drainage_bk_uni, textuur_bk_uni) %>%
+  inner_join(dist_from_target_index %>%
+  left_join(fv_habitat %>%
+              left_join(fv_vegkop %>%
+                          select(spoc, recording_givid) %>%
+                          distinct(),
+                        by = "spoc") %>%
+              select(recording_givid, spoc, mean_ontwgr_sleutelsoorten),
+            by = c("recording_givid")))
+
+
+subset_normering_drainage <- subset_normering_drainage %>%
+  left_join(lut_draintext %>%
+              select(drainage_bk_uni, textuurklasse, ghg_bk_num, glg_bk_num),
+            by = c("drainage_bk_uni" = "drainage_bk_uni",
+                   "textuur_bk_uni" = "textuurklasse")) %>%
+  mutate(amplitude = glg_bk_num - ghg_bk_num) %>%
+  gather(key = "afkorting", value = "mw_imp",
+         -(spoc:mean_ontwgr_sleutelsoorten))
+
+```
+
+
+```{r subset-normering}
+browser()
+subset_normering <- subset_normering_bodem %>%
+  select(spoc, afkorting, mw_imp, detectie, min_bg, max_bg, recording_givid,
+         starts_with("index")) 
+  
+
+# BV als proportie ipv percentage (ivm modellering)
+subset_normering <- subset_normering %>%
+  mutate(mw_imp = ifelse(afkorting == "BV", mw_imp/100, mw_imp),
+         mw_imp = ifelse(afkorting == "BV" & mw_imp > 1, 0.99, mw_imp))
+  
+```
+
+
+
+```{r}
+# er zijn twee recording_givid zonder spoc
+subset_normering_bodem_6230 <- fv_bodemlang_grafiek  %>% 
+  filter(afkorting %in% afkortingen) %>%
+  inner_join(dist_from_target_index_6230)
+```
+
+<!-- waarden van BV gaan soms boven 100% ? Onbetrouwbare CECs? Fout in de berekening? De afwijkingen zijn groter dan de calibratie voor CEC_AgTU = 1.09 * CEC_BaCl2m. Echter op  Ca, K, Mg, Na zitten grotere correcties igv AgTU (hellingen 1.2, 0.9, 1.13, ...). Indien die waarden groter dan 100% het gevolg van deze calibraties zijn, is het beter de BV te berekenen vóór de calibraties (aangezien het toch relatief is)?-->
+
+```{r eval = FALSE, echo = FALSE}
+subset_normering_drainage_6230 <- fv_basis %>%
+  select(spoc, drainage_bk_uni, textuur_bk_uni) %>%
+  inner_join(dist_from_target_index_6230 %>%
+               left_join(dist_from_target_scores_6230 %>%
+              filter(criterium == "Vegetatie") %>%
+              group_by(habitattype, recording_givid, spoc) %>%
+              #berekening als gemiddelde van gemiddelde score per criterium
+              summarise(index_ss = mean(score))))
+
+
+subset_normering_drainage_6230 <- subset_normering_drainage_6230 %>%
+  left_join(lut_draintext %>%
+              select(drainage_bk_uni, textuurklasse, ghg_bk_num, glg_bk_num),
+            by = c("drainage_bk_uni" = "drainage_bk_uni",
+                   "textuur_bk_uni" = "textuurklasse")) %>%
+  mutate(amplitude = glg_bk_num - ghg_bk_num) %>%
+  gather(key = "afkorting", value = "mw_imp",
+         -(spoc:index_ss))
+
+```
+
+
+```{r}
+subset_normering_6230 <- subset_normering_bodem_6230 
+  
+
+# BV als proportie ipv percentage (ivm modellering)
+# en aftoppen op 100% voor waarden > 100 % (owv vrij Ca in kalkrijke bodems)
+subset_normering_6230 <- subset_normering_6230 %>%
+  mutate(mw_imp = ifelse(afkorting == "BV", mw_imp/100, mw_imp),
+         mw_imp = ifelse(afkorting == "BV" & mw_imp > 1, 0.99, mw_imp))
+  
+```
+
+
+## Verkenning
+
+### Abiotische variabelen
+
+```{r}
+subset_normering_6230 %>%
+  ggplot(aes(x = mw_imp)) +
+  geom_density(aes(colour = habitattype)) + 
+  facet_wrap(~afkorting, scales = "free")
+```
+
+
+```{r}
+subset_normering_6230 %>%
+  ggplot(aes(y = mw_imp, x = afkorting)) + 
+  geom_boxplot(aes(colour = habitattype), 
+               position = position_dodge(preserve = "total", 
+                                         width = 0.5)) + 
+  facet_wrap(~afkorting, scales = "free")
+```
+
+
+
+### Biotische index en abiotische variabelen
+
+$I$ = Impact (biotische index)
+$S$ = State (milieuvariabele)
+
+$I \sim f(S)$
+
+
+```{r warning = FALSE, message=FALSE}
+subset_normering %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(y = indexwaarde, x = mw_imp)) + 
+  geom_point() + 
+  geom_smooth() + 
+  stat_quantile(quantiles = 0.9, method = "rqss", lambda = 20) + 
+  geom_hline(yintercept = 0) +
+  scale_y_continuous(limits = c(-1, 1)) +
+  facet_grid(welke_index ~ afkorting, scales = "free_x")
+```
+
+
+
+Het patroon voor P.OLSEN wordt mogelijk verstoord door twee punten met afwijkende waarden. Bij nadere inspectie gaat het om de enige twee punten die op venige bodem (textuurklasse V) bemonsterd werden (in de Vallei van de Drie beken).  
+
+
+```{r}
+subset_normering %>%
+  #select(-textuur_bk_uni, -drainage_bk_uni, -mean_ontwgr_sleutelsoorten) %>%
+  filter(afkorting == "P.OLSEN", 
+         mw_imp > 25) %>%
+  left_join(fv_basis %>% 
+              select(spoc, textuur_bk_uni), by = "spoc") 
+```
+
+
+
+```{r warning = FALSE, message=FALSE}
+subset_normering_6230 %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(x = mw_imp, y = indexwaarde)) +
+  geom_point(aes(colour = habitattype)) + 
+  geom_hline(yintercept = 0) +
+  scale_y_continuous(limits = c(-1, 1)) +
+  stat_quantile(method = "rqss", lambda = 20, quantiles = 0.9) + 
+  facet_grid(welke_index ~ afkorting, scales = "free_x")
+  
+```
+
+
+$S \sim f(I)$
+
+We tonen nu zowel de 10% als de 90% (gesmoothe) kwantielregressielijnen.
+
+```{r warning = FALSE, message=FALSE}
+subset_normering %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(x = indexwaarde, y = mw_imp)) + 
+  geom_point() + 
+  geom_smooth() + 
+  stat_quantile(quantiles = c(0.1,0.9), method = "rqss", lambda = 1/5) + 
+  geom_vline(xintercept = 0) +
+  scale_x_continuous(limits = c(-1, 1)) +
+  facet_grid(afkorting~welke_index, scales = "free_y")
+```
+
+```{r warning = FALSE, message=FALSE}
+subset_normering_6230 %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1",
+                                        "index_p0",
+                                        "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde",
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot(aes(x = indexwaarde, y = mw_imp)) + 
+  geom_point(aes(colour = habitattype)) + 
+  stat_quantile(quantiles = c(0.1,0.9), method = "rqss", lambda = 1/5) + 
+  geom_vline(xintercept = 0) +
+  scale_x_continuous(limits = c(-1, 1)) +
+  facet_grid(afkorting~welke_index, scales = "free_y")
+```
+
+## Tolerantie-interval
+
+
+We filteren de outliers bij NP.RATIO weg en we verwijderen opnamen gelegen op veenbodems (cf verkenning):
+
+```{r}
+subset_normering <- subset_normering %>%
+  #select(-textuur_bk_uni, -drainage_bk_uni, -mean_ontwgr_sleutelsoorten) %>%
+  filter(!(afkorting == "NP.RATIO" & mw_imp > 2000)) %>%
+  anti_join(fv_basis %>% 
+              select(spoc, textuur_bk_uni) %>% 
+              distinct() %>%
+              filter(textuur_bk_uni == "V"))
+```
+
+
+
+We nemen als "biotisch gunstig" de groep van observaties waarvoor de index > 0. In dit geval valt er maar één opname weg.
+
+Interpretatie zoals bij p-waarde: ALS het buiten het interval ligt is er een probleem, als het er binnen ligt weten we het niet. DUS buiten = ROOD, ORANJE en GRIJS is dan binnen de binnenste betrouwbaarheidsgrenzen (niet GROEN). 
+
+Afwegingskader: one-out-all-out zodra één rood allemaal rood.
+
+```{r message=FALSE, warning=FALSE, results = "hide"}
+interval_family <- data.frame(afkorting = afkortingen,
+                              type_interval = c("upr", 
+                                                 "lwr-upr", 
+                                                 "lwr-upr", 
+                                                 "lwr-upr",
+                                                 "lwr-upr",
+                                                "lwr-upr"),
+                              family = c("Gamma", 
+                                         "Beta", 
+                                         "Gaussian", 
+                                         "lognormal", 
+                                         "lognormal",
+                                         "lognormal"),
+                              stringsAsFactors = FALSE)
+
+tolint <- subset_normering %>%
+  gather("type_index", "indexwaarde", starts_with("index")) %>%
+  filter(indexwaarde > 0,
+         type_index %in% c("index_p0", "index_pmin1")) %>%
+  group_by(type_index, afkorting) %>%
+  nest() %>%
+  left_join(interval_family, by = "afkorting") %>%
+  mutate(model = map2(data, family, ~ brm(bf(mw_imp ~ 1),
+                                 data =  .x,
+                                 family = .y,
+                                 refresh = -1)))
+```
+
+
+Berekening voor een 95% / 80% tolerantie-interval (P = 0.8, alpha = 0.05).
+
+```{r warning = FALSE}
+P = 0.8
+
+# voor de Gamma parametrisatie:
+# mu = shape * scale (de verwachte waarde van y)
+# shape = shape
+# scale = mu / shape
+
+tolint_ps <- tolint %>%
+  mutate(ps = map(model, ~posterior_samples(.x))) %>%
+  unnest(ps) %>%
+  mutate(
+    par1 = case_when(
+      family == "Gamma" ~ exp(b_Intercept), #mu
+      family == "Beta" ~ plogis(b_Intercept), #mu
+      family == "Gaussian" ~ b_Intercept,
+      family == "lognormal" ~ b_Intercept), #mu
+    par2 = case_when(
+      family == "Gamma" ~ shape,
+      family == "Beta" ~ phi,
+      family == "Gaussian" ~ sigma,
+      family == "lognormal" ~ sigma),
+    q_upr = case_when(
+      family == "Gamma" & type_interval == "upr" ~ 
+        qgamma(p = P, shape = par2, scale = par1/par2),
+      family == "Gamma" & type_interval == "lwr-upr" ~ 
+        qgamma(p = (1 + P)/2, shape = par2, scale = par1/par2),
+      family == "Beta" & type_interval == "lwr-upr" ~ 
+        qbeta(p = (1 + P)/2, shape1 = par1 * par2, shape2 = (1 - par1) * par2),
+      family == "Gaussian" & type_interval == "lwr-upr" ~ 
+        qnorm(p = (1 + P)/2, mean = par1, sd = par2),
+      family == "lognormal" & type_interval == "lwr-upr" ~ 
+        qlnorm(p = (1 + P)/2, meanlog = par1, sdlog = par2)),
+    q_lwr = case_when(
+      family == "Gamma" & type_interval == "lwr-upr" ~ 
+        qgamma(p = (1 - P)/2, shape = par2, scale = par1/par2),
+      family == "Beta" & type_interval == "lwr-upr" ~ 
+        qbeta(p = (1 - P)/2, shape1 = par1 * par2, shape2 = (1 - par1) * par2),
+      family == "Gaussian" & type_interval == "lwr-upr" ~ 
+        qnorm(p = (1 - P)/2, mean = par1, sd = par2),
+      family == "lognormal" & type_interval == "lwr-upr" ~ 
+        qlnorm(p = (1 - P)/2, meanlog = par1, sdlog = par2))) %>%
+  group_by(type_index, afkorting, type_interval, family) %>%
+  mutate(mean_g_p = mean((q_lwr + q_upr)/2)) %>% 
+  ungroup()
+```
+
+```{r echo=FALSE, eval=FALSE}
+# de methode voor tweezijdig tol int van Krishnamoorthy (functie zoek_optimum)
+# werkt niet indien de bivariate verdeling niet symmetrisch is rond lwr = 2 * mean_g_p - upr, zoals het geval is bij FeP.RATIO (geeft negatieve lwr bound)
+zoek_optimum <- function(q_lwr, q_upr, 
+                             mean_g_p, alpha) {
+  optim_probleem <- function(x, q_lwr, q_upr, 
+                             mean_g_p, alpha) {
+    q_lwr_ster <- 2 * mean_g_p - x
+    proportie <- sum(q_lwr >= q_lwr_ster & q_upr <= x) / length(q_lwr)
+    (proportie - (1 - alpha))^2
+    }
+  optimum <- optimize(f = optim_probleem, 
+                    interval = c(min(q_upr), max(q_upr)),
+                    q_lwr = q_lwr, 
+                    q_upr = q_upr, 
+                    mean_g_p = mean_g_p[1],
+                    alpha = alpha[1])
+  data.frame(upr = optimum$minimum,
+             lwr = 2 * mean_g_p - optimum$minimum)
+}
+```
+
+```{r}
+# nieuwe functie om optimum te zoeken waarbij q_lwr en q_upr
+# eerst gestandaardiseerd worden (dus mean_g_p = 0)
+zoek_optimum_v2 <- function(q_lwr, q_upr, 
+                             alpha) {
+  optim_probleem <- function(x, q_lwr, q_upr, 
+                             alpha) {
+    q_lwr <- scale(q_lwr)
+    q_upr <- scale(q_upr)
+    q_lwr_ster <-  - x
+    proportie <- sum(q_lwr >= q_lwr_ster & q_upr <= x) / length(q_lwr)
+    (proportie - (1 - alpha))^2
+    }
+  optimum <- optimize(f = optim_probleem, 
+                    interval = c(min(scale(q_upr)), max(scale(q_upr))),
+                    q_lwr = q_lwr, 
+                    q_upr = q_upr, 
+                    alpha = alpha[1])
+  data.frame(upr = optimum$minimum * sd(q_upr) + mean(q_upr),
+             lwr = - optimum$minimum * sd(q_lwr) + mean(q_lwr))
+}
+```
+
+
+```{r}
+tolint_ps_tweezijdig <- tolint_ps %>%
+  group_by(type_index, afkorting, mean_g_p) %>%
+  filter(type_interval == "lwr-upr") %>%
+  do(zoek_optimum_v2(q_lwr = .$q_lwr, q_upr = .$q_upr,
+                  alpha = 0.05))
+
+tolint_ps_eenzijdig <- tolint_ps %>%
+  group_by(type_index, afkorting) %>%
+  filter(type_interval %in% c("lwr", "upr")) %>%
+  summarise(lwr = quantile(x = q_lwr, probs = 0.05, na.rm = TRUE),
+            upr = quantile(x = q_upr, probs = 0.95, na.rm = TRUE))
+
+tolint_ps_beide <- bind_rows(tolint_ps_tweezijdig, tolint_ps_eenzijdig) %>%
+  ungroup()
+```
+
+```{r eval = FALSE, echo=FALSE}
+
+tolint_ps %>%
+  filter(afkorting == "FeP.RATIO") %>%
+  arrange(q_lwr) %>%
+  ggplot(aes(x = q_upr, y = q_lwr)) + 
+  geom_point(alpha = 0.2) + 
+  geom_abline(data = tolint_ps_tweezijdig %>%
+                filter(afkorting == "FeP.RATIO"),
+              aes(slope = -1, intercept = 2*mean_g_p)) +
+  # geom_vline(data = tolint_ps_tweezijdig %>%
+  #               filter(afkorting == "FeP.RATIO"),
+  #            aes(xintercept = upr)) + 
+  # geom_hline(data = tolint_ps_tweezijdig %>%
+  #               filter(afkorting == "FeP.RATIO"),
+  #            aes(yintercept = lwr)) + 
+  facet_wrap(~type_index)
+```
+
+
+```{r eval=FALSE, echo=FALSE}
+tolint_ps  %>%
+  ungroup() %>%
+  gather(key = "key", value = "value", q_upr, q_lwr) %>%
+  ggplot(aes(x = value)) + 
+  geom_density(aes(colour = key)) +
+  geom_density(data  = subset_normering %>%
+                 gather("type_index", "indexwaarde", starts_with("index")) %>%
+                 filter(indexwaarde > 0),
+               aes(x = mw_imp)) + 
+  geom_rug(data  = subset_normering %>%
+                 gather("type_index", "indexwaarde", starts_with("index")) %>%
+                 filter(indexwaarde > 0),
+               aes(x = mw_imp)) + 
+  geom_vline(data = tolint_ps_beide %>%
+               rename(q_lwr = lwr, q_upr = upr) %>%
+               gather("key", "value", q_lwr, q_upr), 
+             aes(xintercept = value, colour = key)) + 
+  facet_wrap(~afkorting + type_index, scales = "free")
+```
+
+
+```{r}
+tolint_ps_beide %>%
+  rename(q_lwr = lwr, q_upr = upr) %>%
+  gather("key", "value", q_lwr, q_upr) %>%
+  bind_rows(subset_normering %>%
+               gather("type_index", "indexwaarde", starts_with("index")) %>%
+              filter(type_index %in% c("index_p0", "index_pmin1")) %>%
+               group_by(type_index, afkorting) %>%
+               summarise(observed_min = min(mw_imp, na.rm = TRUE),
+                         observed_max = max(mw_imp, na.rm = TRUE)) %>%
+               gather("key", "value", observed_min, observed_max)) %>%
+  mutate(type_index = factor(type_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))) %>%
+  ggplot(aes(x = value, y = type_index)) + 
+  geom_point(aes(colour = key)) +
+  facet_wrap(~afkorting, scales = "free_x") 
+```
+
+
+
+## Norm via I ~ f(S)
+
+### Enkel subset 6230_hmo
+
+Uit de verkennende analyse blijkt dat toepassen van deze techniek wellicht geen normen zal opleveren (in alle gevallen loopt het 90-percentiel quasi parallel met de x-as). Dit kan op verschillende zaken wijzen:
+
+- de gekozen abiotische milieuvariabelen niet limiterend zijn voor de biotische kwaliteit die geobserveerd wordt in de subset 6230_hmo
+- er te weinig data zijn om een onderliggend patroon te kunnen detecteren
+- er invloedrijke punten zijn die de patronen vertekenen
+- we een dataset moeten gebruiken die een bredere gradiënt (biotisch en abiotisch) bestrijkt
+
+<!--
+
+```{r eval = FALSE, message=FALSE, warning=FALSE, results = "hide"}
+# nog modellen voor kwadratisch verband toevoegen
+# een manier vinden om de code sneller te laten lopen
+# alles in één mutate statement gaat niet want geeft foutmelding maximum number of DLLs reached omdat er zeer veel tijdelijke bestanden worden weggeschreven
+
+kwantregr <- subset_normering %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(index_01 = (indexwaarde + 1)/2) %>%
+  group_by(afkorting, welke_index) %>%
+  # voorlopig via transformatie weg van exacte 0 en 1
+  mutate(index_01 = (index_01 * (n() − 1) + 0.5) / n()) %>%
+  # x en y voor gp(x, y) echter sampling duurt dan veel langer en soms error
+  #left_join(fv_basis %>% select(spoc, x, y)) %>%
+  nest() %>%
+  filter(welke_index %in% c("index_p0", "index_pmin1"),
+         afkorting %in% afkortingen) %>%
+  mutate(mu_slope = map(data, ~brm(bf(index_01 ~  mw_imp,
+                                      phi ~ 1),
+                                   data =  .x,
+                                   family = Beta(),
+                                   refresh = -1, 
+                                   silent = TRUE,
+                                   inits = "0",
+                                   control = list(adapt_delta = 0.85))))
+```
+
+```{r eval = FALSE, message=FALSE, warning=FALSE, results = "hide"}
+
+kwantregr <- kwantregr %>%
+  mutate(phi_slope = map2(.x = mu_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ 1,
+                                        phi ~ mw_imp)),
+                             newdata = .y),
+         phi2_slope = map2(.x = phi_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ 1,
+                                        phi ~ scale(mw_imp) +
+                                          I(scale(mw_imp)^2))),
+                             newdata = .y),
+         mu2_slopes = map2(.x = mu_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ scale(mw_imp) +
+                                          I(scale(mw_imp)^2),
+                                        phi ~ 1)),
+                             newdata = .y)
+         )
+
+```
+
+
+
+
+```{r eval = FALSE, warning = FALSE}
+kwantregr_lang <- kwantregr %>%
+  gather(key = "modelnaam", value = "model", -afkorting, -welke_index, 
+         -data) %>%
+  mutate(loo = map(model, ~loo(.x)))
+```
+
+
+
+```{r eval = FALSE, warning=FALSE, message=FALSE}
+loo_result <- kwantregr_lang %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"])) %>%
+  # code toegevoegd om te vermijden dat kwadratisch model geselecteerd wordt
+  # voor een variabele waar je een éénzijdig interval wenst
+  left_join(interval_family %>% select(-family)) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(!(type_interval == "upr" & modelnaam == "mu2_slopes")) %>%
+  filter(min(looic) == looic)
+
+loo_result
+```
+
+```{r eval = FALSE, echo=FALSE}
+kwantregr_lang %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"]),
+         looic_se = map_dbl(loo, ~.x$estimates["looic", "SE"])) %>%
+  group_by(afkorting, welke_index) %>%
+  ggplot(aes(x = modelnaam, y = looic)) + 
+  geom_col() +
+  geom_errorbar(aes(ymin = looic - looic_se, ymax = looic + looic_se),
+                stat = "identity", width = 0.5) +
+  facet_wrap(welke_index~afkorting)
+```
+
+```{r eval = FALSE}
+xvalues <- subset_normering %>%
+  group_by(afkorting) %>%
+  summarise(min_mw  = min(mw_imp, na.rm = TRUE),
+            max_mw = max(mw_imp, na.rm = TRUE)) %>%
+  group_by(afkorting) %>%
+  do(data.frame(x = seq(.$min_mw, .$max_mw, length.out = 100)))
+
+
+kwantregr_ps <- kwantregr_lang %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"])) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(min(looic) == looic) %>%
+  mutate(ps = map(model, ~posterior_samples(.x, "^b")),
+         ps = map2(ps, modelnaam, 
+                   ~switch(.y,
+                           no_slopes = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept")),
+                           mu_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                     "mu_slope")),
+                           mu_phi_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "mu_slope",
+                                                      "phi_slope")),
+                           phi_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "phi_slope")),
+                           phi2_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "phi_slope",
+                                                      "phi_slope2")),
+                           mu2_slopes = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "mu_slope",
+                                                      "mu_slope2"))))) %>%
+  unnest(ps) %>%
+  group_by(afkorting, welke_index, modelnaam) %>%
+  mutate(iter =  row_number()) %>%
+  gather(key = "param", "value", -afkorting, -welke_index, -modelnaam, 
+         -iter, -looic) %>%
+  separate(param, c("part", "param")) %>%
+  spread(param, value, fill = 0) %>%
+  mutate(slope2 = if (exists('slope2', where = .)) slope2 else 0) %>%
+  left_join(xvalues, by = "afkorting") %>%
+  mutate(linpred = case_when(
+    modelnaam == "no_slopes" ~ intercept,
+    modelnaam == "mu_slope" ~ intercept + slope * x,
+    modelnaam == "mu_phi_slope" ~ intercept + slope * x,
+    modelnaam == "phi_slope" ~ intercept + slope * x,
+    modelnaam == "phi2_slope" ~ intercept + slope * scale(x) + 
+      slope2 * scale(x)^2,
+    modelnaam == "mu2_slopes" ~ intercept + slope * scale(x) +
+                              slope2 * scale(x)^2)) %>%
+  ungroup() %>%
+  select(-intercept, -slope, -slope2)
+
+```
+
+
+
+We tonen de resultaten  voor de beste modellen (laagste looic).
+
+
+```{r eval = FALSE}
+q90results <- kwantregr_ps %>%
+  nest(-afkorting, -welke_index, -modelnaam) %>%
+  mutate(data = map(data, ~spread(.x, key = part, value = linpred))) %>%
+  unnest() %>%
+  mutate(mu = plogis(mu),
+         phi = exp(phi),
+         q90 = qbeta(p = 0.9, 
+                     shape1 = mu * phi,
+                     shape2 = (1 - mu) * phi)) %>%
+  group_by(afkorting, welke_index, x) %>%
+  summarise(q90_median = median(q90, na.rm = TRUE),
+            q90_lwr = quantile(x = q90, probs = 0.025, na.rm = TRUE),
+            q90_upr = quantile(x = q90, probs = 0.975, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+
+```{r eval = FALSE}
+xintercepts <- q90results %>%
+  group_by(afkorting, welke_index) %>%
+  filter(row_number() == which.min(abs(q90_lwr * 2  - 1)) &
+         abs(q90_lwr * 2 - 1) < 0.01 |
+           row_number() == which.min(abs(q90_upr * 2  - 1)) &
+         abs(q90_upr * 2 - 1) < 0.01 ) %>%
+  ungroup() 
+
+subset_normering %>% 
+  gather("welke_index", "indexwaarde", starts_with("index")) %>%
+  filter(welke_index %in% c("index_p0", "index_pmin1"),
+         afkorting %in% afkortingen) %>%
+   mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))) %>%
+  ggplot() + 
+  geom_point(aes(x = mw_imp, y = indexwaarde)) + 
+  geom_ribbon(data = q90results %>%
+                mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))), 
+              aes(x = x, group = afkorting,
+                  ymin = q90_lwr * 2 - 1, 
+                  ymax = q90_upr * 2 - 1), alpha = 0.2) +
+  geom_line(data = q90results %>%
+              mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))) , 
+              aes(x = x, group = afkorting,
+                  y = q90_median * 2 - 1)) +
+  geom_vline(data = xintercepts %>%
+               mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))) , 
+             aes(xintercept = x), colour = "red") +
+  geom_hline(yintercept = 0, colour = "red") + 
+  scale_y_continuous("Kwaliteitsindex", limits = c(-1,1)) + 
+  facet_grid(welke_index ~ afkorting, scales = "free")
+
+```
+
+-->
+
+Equivariantie van kwantielen bij transformatie: de kwantielen van een getransformeerde distributie zijn gelijk aan de getransformeerde kwantielen van de oorspronkelijke distributie (niet zo voor het gemiddelde). Dit laat toe om continue responsvariabelen die een boven en/of ondergrens hebben te analyseren via kwantielregressie [@Geraci2015].  Daarom passen we klassieke kwantielregressie toe (via de asymmetrische Laplace distributie, zie @Yu2001) na transformatie van de indexen (-1, 1) via translatie naar (0, 1) gevolgd door logit-transformatie (-Inf, +Inf). Om computationele problemen te vermijden voor logit(0) of logit(1), is er bijkomend een transformatie die de (0-1) schaal lichtjes samendrukt [@Cribari-Neto2010a]. 
+
+```{r message=FALSE, warning=FALSE, results = "hide"}
+# nog modellen voor kwadratisch verband toevoegen
+# een manier vinden om de code sneller te laten lopen
+
+kwantregr_al <- subset_normering %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(index_01 = (indexwaarde + 1)/2) %>%
+  group_by(afkorting, welke_index) %>%
+  # voorlopig via transformatie weg van exacte 0 en 1
+  mutate(index_01 = (index_01 * (n() − 1) + 0.5) / n(),
+         index_logit = qlogis(index_01)) %>% 
+  nest() %>%
+  mutate(mu_slope = map(data, ~brm(bf(index_logit  ~
+                                            mw_imp,
+                                      quantile = 0.9),
+                                   data =  .x,
+                                   family = asym_laplace(),
+                                   refresh = -1, 
+                                   silent = TRUE)),
+         mu_slope2 = map(mu_slope, ~update(.x,
+                                          index_logit ~ poly(mw_imp, 2))))
+
+```
+
+
+
+```{r warning = FALSE, message = FALSE, results="hide"}
+kwantregr_al <- kwantregr_al %>%
+  mutate(loo_diff = map2(mu_slope, mu_slope2, ~loo(.x, .y, 
+                                                   reloo = TRUE,
+                                                   model_names = c("mu_slope",
+                                                                   "mu_slope2"))),
+         parsimonious = map_chr(loo_diff, 
+                            ~ ifelse(.x$ic_diffs__["mu_slope - mu_slope2", 
+                                                "DIAGNOSTICS"] - 
+                              .x$ic_diffs__["mu_slope - mu_slope2", 
+                                                "SE"] > 0,
+                              "mu_slope2",
+                              "mu_slope")))
+```
+
+
+
+```{r warning = FALSE, message = FALSE, results="hide"}
+kwantregr_al_parsimonious <- kwantregr_al %>%
+  gather(key = "modelnaam", value = "model", -afkorting, -welke_index, 
+         -data, -parsimonious) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(parsimonious == modelnaam) %>%
+  ungroup() %>%
+  mutate(predictions = map(model, ~marginal_effects(.x, dpar = "mu", 
+                                                    plot = FALSE)$mw_imp)) %>%
+  unnest(predictions) %>%
+  mutate_at(c("estimate__", "lower__", "upper__"), .funs = 
+              function(x) plogis(x) * 2 - 1) %>%
+  mutate(welke_index = factor(welke_index, 
+                              levels = c("index_p1","index_p0", "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde",
+                                        "minimum")))
+```
+
+
+```{r}
+xintercepts <- kwantregr_al_parsimonious %>%
+  gather("welke_grens", "waarde", lower__, upper__) %>%
+  group_by(afkorting, welke_index, welke_grens) %>%
+  arrange(mw_imp) %>%
+  filter(sign(waarde) != lag(sign(waarde))) %>%
+  ungroup()
+```
+
+
+```{r}
+xrect <- xintercepts %>%
+  group_by(afkorting, welke_index) %>%
+  bind_rows(xintercepts %>%
+              select(afkorting, welke_index) %>% 
+              distinct() %>%
+              mutate(mw_imp = -Inf)) %>%
+  arrange(mw_imp) %>%
+  mutate(id = row_number() - 1,
+         xmin = mw_imp, 
+         xmax = lead(mw_imp),
+         xmax = ifelse(is.na(xmax), Inf, xmax)) %>%
+  select(afkorting, welke_index, mw_imp, id, xmin, xmax) %>%
+  arrange(afkorting, welke_index, id) %>%
+  ungroup()
+
+
+kleurcode <- kwantregr_al_parsimonious %>%
+  group_by(row_number()) %>%
+  mutate(kleurcode = case_when(
+    0 < lower__ ~ "darkgrey",
+    between(0, lower__, upper__) ~ "orange",
+    upper__ < 0 ~ "red"
+  )) %>%
+  ungroup() %>%
+  select(afkorting, welke_index, mw_imp, kleurcode) %>%
+  group_by(afkorting, welke_index) %>%
+  arrange(afkorting, welke_index, mw_imp) %>%
+  mutate(id = cumsum(kleurcode != ifelse(
+    is.na(lag(kleurcode)), 
+          kleurcode, 
+          lag(kleurcode)
+          )
+      )
+    ) %>% 
+  select(afkorting, welke_index, kleurcode, id) %>%
+  distinct() 
+  
+xrect <- xrect %>%
+  left_join(kleurcode, 
+            by = c("afkorting","welke_index", "id"))
+
+```
+
+
+```{r}
+p <- subset_normering %>% 
+  gather("welke_index", "indexwaarde", starts_with("index")) %>%
+  filter(afkorting %in% afkortingen) %>%
+   mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1","index_p0", "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  group_by(afkorting, welke_index) %>%
+  mutate(selectie = ifelse(spoc %in% c("bg310", "bg408", "hd076", "hs018", 
+                                       "hs070", "hd062", "hs022"),
+                                  spoc, NA)) %>%
+  ungroup() %>%
+  ggplot() + 
+  geom_rect(data = xrect, 
+            aes(xmin = xmin, xmax = xmax, 
+                ymin = -1, ymax = 1,
+                group = id, fill = kleurcode), 
+            alpha = 0.2) + 
+  geom_point(aes(x = mw_imp, y = indexwaarde)) + 
+  geom_point(data =  . %>% filter(!is.na(selectie)), 
+             aes(x = mw_imp, y = indexwaarde, colour = selectie), 
+             size = 2) + 
+  geom_ribbon(data = kwantregr_al_parsimonious, 
+              aes(x = mw_imp, group = afkorting,
+                  ymin = lower__, 
+                  ymax = upper__), alpha = 0.2) +
+  geom_line(data = kwantregr_al_parsimonious, 
+              aes(x = mw_imp, group = afkorting,
+                  y = estimate__)) +
+  geom_vline(data = xintercepts, 
+             aes(xintercept = mw_imp), colour = "red") +
+  geom_hline(yintercept = 0, colour = "red") + 
+  scale_y_continuous("Kwaliteitsindex", limits = c(-1,1)) + 
+  scale_fill_manual(values = c("darkgrey", "orange", "red"), 
+                    breaks = waiver(),
+                    labels = c("Niet limiterend", "Mogelijk limiterend", 
+                               "Limiterend")) +
+  facet_grid(welke_index ~ afkorting, scales = "free") +
+  theme_bw()
+
+p
+```
+
+
+
+### Toepassing op alle 6230 subtypes
+
+
+Het idee hierachter is dat de relatie I ~ f(S) beter kan omschreven worden indien meer situaties betrokken worden die een verstoring / minder goed ontwikkeling vertegenwoordigen wanneer 6230_hmo de referentie is. Sommige van deze subtypes kunnen immers geïnterpreteerd worden als bijvoorbeeld verdroogde situaties (hn, ha, hnk) of meer voedselrijke situaties (ha, hnk) ten opzichte van het doeltype.
+
+
+
+We filteren de outliers bij NP.RATIO weg en we verwijderen opnamen gelegen op veenbodems (cf verkenning):
+
+```{r}
+subset_normering_6230 <- subset_normering_6230 %>%
+  #select(-textuur_bk_uni, -drainage_bk_uni, -mean_ontwgr_sleutelsoorten) %>%
+  filter(!(afkorting == "NP.RATIO" & mw_imp > 2000)) %>%
+  anti_join(fv_basis %>% 
+              select(spoc, textuur_bk_uni) %>% 
+              distinct() %>%
+              filter(textuur_bk_uni == "V"))
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, results = "hide"}
+# nog modellen voor kwadratisch verband toevoegen
+# een manier vinden om de code sneller te laten lopen
+
+kwantregr_al_6230 <- subset_normering_6230 %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(index_01 = (indexwaarde + 1)/2) %>%
+  group_by(afkorting, welke_index) %>%
+  # voorlopig via transformatie weg van exacte 0 en 1
+  mutate(index_01 = (index_01 * (n() − 1) + 0.5) / n(),
+         index_logit = qlogis(index_01)) %>% 
+  nest() %>%
+  mutate(mu_slope = map(data, ~brm(bf(index_logit  ~
+                                            mw_imp,
+                                      quantile = 0.9),
+                                   data =  .x,
+                                   family = asym_laplace(),
+                                   refresh = -1, 
+                                   silent = TRUE)),
+         mu_slope2 = map(mu_slope, ~update(.x,
+                                          index_logit ~ poly(mw_imp, 2))))
+
+```
+
+
+
+```{r warning = FALSE, message = FALSE, results="hide"}
+kwantregr_al_6230 <- kwantregr_al_6230 %>%
+  mutate(loo_diff = map2(mu_slope, mu_slope2, ~loo(.x, .y, 
+                                                   reloo = TRUE,
+                                                   model_names = c("mu_slope",
+                                                                   "mu_slope2"))),
+         parsimonious = map_chr(loo_diff, 
+                            ~ ifelse(.x$ic_diffs__["mu_slope - mu_slope2", 
+                                                "DIAGNOSTICS"] - 
+                              .x$ic_diffs__["mu_slope - mu_slope2", 
+                                                "SE"] > 0,
+                              "mu_slope2",
+                              "mu_slope")))
+```
+
+
+
+```{r warning = FALSE, message = FALSE, results="hide"}
+kwantregr_al_6230_parsimonious <- kwantregr_al_6230 %>%
+  gather(key = "modelnaam", value = "model", -afkorting, -welke_index, 
+         -data, -parsimonious) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(parsimonious == modelnaam) %>%
+  ungroup() %>%
+  mutate(predictions = map(model, ~marginal_effects(.x, dpar = "mu", 
+                                                    plot = FALSE)$mw_imp)) %>%
+  unnest(predictions) %>%
+  mutate_at(c("estimate__", "lower__", "upper__"), .funs = 
+              function(x) plogis(x) * 2 - 1) %>%
+  mutate(welke_index = factor(welke_index, 
+                              levels = c("index_p1","index_p0", "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde",
+                                        "minimum")))
+```
+
+
+```{r}
+xintercepts_6230 <- kwantregr_al_6230_parsimonious %>%
+  gather("welke_grens", "waarde", lower__, upper__) %>%
+  group_by(afkorting, welke_index, welke_grens) %>%
+  arrange(mw_imp) %>%
+  filter(sign(waarde) != lag(sign(waarde))) %>%
+  ungroup()
+```
+
+
+```{r}
+# kleurcode:
+# grijze zone: (index = 0) < lower
+# oranje zone: lower <= (index = 0) <= upper
+# rode zone: (index = 0) > upper
+
+xrect_6230 <- xintercepts_6230 %>%
+  group_by(afkorting, welke_index) %>%
+  bind_rows(xintercepts_6230 %>%
+              select(afkorting, welke_index) %>% 
+              distinct() %>%
+              mutate(mw_imp = -Inf)) %>%
+  arrange(mw_imp) %>%
+  mutate(id = row_number() - 1,
+         xmin = mw_imp, 
+         xmax = lead(mw_imp),
+         xmax = ifelse(is.na(xmax), Inf, xmax)) %>%
+  select(afkorting, welke_index, mw_imp, id, xmin, xmax) %>%
+  arrange(afkorting, welke_index, id) %>%
+  ungroup()
+
+
+kleurcode_6230 <- kwantregr_al_6230_parsimonious %>%
+  group_by(row_number()) %>%
+  mutate(kleurcode = case_when(
+    0 < lower__ ~ "darkgrey",
+    between(0, lower__, upper__) ~ "orange",
+    upper__ < 0 ~ "red"
+  )) %>%
+  ungroup() %>%
+  select(afkorting, welke_index, mw_imp, kleurcode) %>%
+  group_by(afkorting, welke_index) %>%
+  arrange(afkorting, welke_index, mw_imp) %>%
+  mutate(id = cumsum(kleurcode != ifelse(
+    is.na(lag(kleurcode)), 
+          kleurcode, 
+          lag(kleurcode)
+          )
+      )
+    ) %>% 
+  select(afkorting, welke_index, kleurcode, id) %>%
+  distinct() 
+  
+xrect_6230 <- xrect_6230 %>%
+  left_join(kleurcode_6230, 
+            by = c("afkorting","welke_index", "id"))
+
+```
+
+
+```{r}
+subset_normering_6230 %>% 
+  gather("welke_index", "indexwaarde", starts_with("index")) %>%
+  filter(afkorting %in% afkortingen) %>%
+   mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p1","index_p0", "index_pmin1",
+                                        "index_minimum"),
+                             labels = c("rekenkundig gemiddelde",
+                                        "meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde",
+                                        "minimum"))) %>%
+  ggplot() + 
+  geom_rect(data = xrect_6230, 
+            aes(xmin = xmin, xmax = xmax, 
+                ymin = -1, ymax = 1,
+                group = id, fill = kleurcode), 
+            alpha = 0.2) + 
+  geom_point(aes(x = mw_imp, y = indexwaarde, colour = habitattype)) + 
+  geom_ribbon(data = kwantregr_al_6230_parsimonious, 
+              aes(x = mw_imp, group = afkorting,
+                  ymin = lower__, 
+                  ymax = upper__), alpha = 0.2) +
+  geom_line(data = kwantregr_al_6230_parsimonious, 
+              aes(x = mw_imp, group = afkorting,
+                  y = estimate__)) +
+  geom_vline(data = xintercepts_6230, 
+             aes(xintercept = mw_imp), colour = "red") +
+  geom_hline(yintercept = 0, colour = "red") + 
+  scale_y_continuous("Kwaliteitsindex", limits = c(-1,1)) + 
+  scale_fill_manual(values = c("darkgrey", "orange", "red"), 
+                    breaks = waiver(),
+                    labels = c("Niet limiterend", "Mogelijk limiterend", 
+                               "Limiterend")) +
+  facet_grid(welke_index ~ afkorting, scales = "free") + 
+  theme_bw()
+
+```
+
+<!--
+```{r eval = FALSE, message=FALSE, warning=FALSE, results = "hide"}
+# nog modellen voor kwadratisch verband toevoegen
+# een manier vinden om de code sneller te laten lopen
+
+kwantregr_6230 <- subset_normering_6230 %>%
+  gather(key = "welke_index", value = "indexwaarde", starts_with("index")) %>%
+  mutate(index_01 = (indexwaarde + 1)/2,
+         index_01 = (index_01 * (n() − 1) + 0.5) / n()) %>%
+  group_by(afkorting, welke_index) %>%
+  nest() %>%
+  filter(welke_index %in% c("index_p0", "index_pmin1")) %>%
+  mutate(mu_slope = map(data, ~brm(bf(index_01 ~  mw_imp,
+                                      phi ~ 1),
+                                   data =  .x,
+                                   family = Beta(),
+                                   refresh = -1, 
+                                   silent = TRUE,
+                                   inits = "0",
+                                   control = list(adapt_delta = 0.85))))
+```
+
+```{r eval = FALSE, message=FALSE, warning=FALSE, results = "hide"}
+
+kwantregr_6230 <- kwantregr_6230 %>%
+  mutate(phi_slope = map2(.x = mu_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ 1,
+                                        phi ~ mw_imp)),
+                             newdata = .y),
+         phi2_slope = map2(.x = phi_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ 1,
+                                        phi ~ scale(mw_imp) +
+                                          I(scale(mw_imp)^2))),
+                             newdata = .y),
+         mu2_slopes = map2(.x = mu_slope, .y = data,
+                             ~update(.x,
+                                     bf(index_01 ~ scale(mw_imp) +
+                                          I(scale(mw_imp)^2),
+                                        phi ~ 1)),
+                             newdata = .y)
+         )
+
+```
+
+```{r eval = FALSE, echo = FALSE}
+# diagnose van NUTS sampling problemen
+fit <- kwantregr_6230$phi2_slope[[1]]
+np <- nuts_params(fit)
+pairs(fit, np = np)
+```
+
+
+
+```{r eval = FALSE,warning = FALSE}
+kwantregr_lang_6230 <- kwantregr_6230 %>%
+  gather(key = "modelnaam", value = "model", -afkorting, -welke_index, 
+         -data) %>%
+  mutate(loo = map(model, ~loo(.x)))
+```
+
+
+
+```{r eval = FALSE,message=FALSE, warning=FALSE}
+loo_result_6230 <- kwantregr_lang_6230 %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"])) %>%
+  # code toegevoegd om te vermijden dat kwadratisch model geselecteerd wordt
+  # voor een variabele waar je een éénzijdig interval wenst
+  left_join(interval_family %>% select(-family)) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(!(type_interval == "upr" & modelnaam == "mu2_slopes")) %>%
+  filter(min(looic) == looic)
+
+loo_result_6230
+```
+
+```{r eval = FALSE,echo=FALSE}
+kwantregr_lang_6230 %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"]),
+         looic_se = map_dbl(loo, ~.x$estimates["looic", "SE"])) %>%
+  group_by(afkorting, welke_index) %>%
+  ggplot(aes(x = modelnaam, y = looic)) + 
+  geom_col() +
+  geom_errorbar(aes(ymin = looic - looic_se, ymax = looic + looic_se),
+                stat = "identity", width = 0.5) +
+  facet_wrap(welke_index~afkorting)
+```
+
+```{r eval = FALSE}
+xvalues_6230 <- subset_normering_6230 %>%
+  group_by(afkorting) %>%
+  summarise(min_mw  = min(mw_imp, na.rm = TRUE),
+            max_mw = max(mw_imp, na.rm = TRUE)) %>%
+  group_by(afkorting) %>%
+  do(data.frame(x = seq(.$min_mw, .$max_mw, length.out = 100))) %>%
+  ungroup()
+
+
+kwantregr_ps_6230 <- kwantregr_lang_6230 %>%  
+  mutate(looic = map_dbl(loo, ~.x$estimates["looic", "Estimate"])) %>%
+  group_by(afkorting, welke_index) %>%
+  filter(min(looic, na.rm = TRUE) == looic) %>%
+  mutate(ps = map(model, ~posterior_samples(.x, "^b")),
+         ps = map2(ps, modelnaam, 
+                   ~switch(.y,
+                           no_slopes = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept")),
+                           mu_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                     "mu_slope")),
+                           mu_phi_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "mu_slope",
+                                                      "phi_slope")),
+                           phi_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "phi_slope")),
+                           phi2_slope = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "phi_slope",
+                                                      "phi_slope2")),
+                           mu2_slopes = setNames(.x, c("mu_intercept",
+                                                      "phi_intercept",
+                                                      "mu_slope",
+                                                      "mu_slope2"))))) %>%
+  unnest(ps) %>%
+  group_by(afkorting, welke_index, modelnaam) %>%
+  mutate(iter =  row_number()) %>%
+  gather(key = "param", "value", -afkorting, -welke_index, -modelnaam, 
+         -iter, -looic) %>%
+  separate(param, c("part", "param")) %>%
+  spread(param, value, fill = 0) %>%
+  mutate(slope2 = if (exists('slope2', where = .)) slope2 else 0) %>%
+  ungroup() %>%
+  left_join(xvalues_6230, by = "afkorting") %>%
+  mutate(linpred = case_when(
+    modelnaam == "no_slopes" ~ intercept,
+    modelnaam == "mu_slope" ~ intercept + slope * x,
+    modelnaam == "mu_phi_slope" ~ intercept + slope * x,
+    modelnaam == "phi_slope" ~ intercept + slope * x,
+    modelnaam == "phi2_slope" ~ intercept + slope * scale(x) + 
+      slope2 * scale(x)^2,
+    modelnaam == "mu2_slopes" ~ intercept + slope * scale(x) +
+                              slope2 * scale(x)^2)) %>%
+  select(-intercept, -slope, -slope2)
+
+```
+
+
+
+We tonen de resultaten  voor de beste modellen (laagste looic).
+
+
+```{r eval = FALSE}
+q90results_6230 <- kwantregr_ps_6230 %>%
+  nest(-afkorting, -welke_index, -modelnaam) %>%
+  mutate(data = map(data, ~spread(.x, key = part, value = linpred))) %>%
+  unnest() %>%
+  mutate(mu = plogis(mu),
+         phi = exp(phi),
+         q90 = qbeta(p = 0.9, 
+                     shape1 = mu * phi,
+                     shape2 = (1 - mu) * phi)) %>%
+  group_by(afkorting, welke_index, x) %>%
+  summarise(q90_median = median(q90, na.rm = TRUE),
+            q90_lwr = quantile(x = q90, probs = 0.025, na.rm = TRUE),
+            q90_upr = quantile(x = q90, probs = 0.975, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+
+```{r eval = FALSE}
+xintercepts_6230 <- q90results_6230 %>%
+  group_by(afkorting, welke_index) %>%
+  filter(row_number() == which.min(abs(q90_lwr * 2  - 1)) &
+         abs(q90_lwr * 2 - 1) < 0.01 |
+           row_number() == which.min(abs(q90_upr * 2  - 1)) &
+         abs(q90_upr * 2 - 1) < 0.01 ) %>%
+  ungroup() 
+
+subset_normering_6230 %>% 
+  gather("welke_index", "indexwaarde", starts_with("index")) %>%
+  filter(welke_index %in% c("index_p0", "index_pmin1"),
+         afkorting %in% afkortingen) %>%
+  mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))) %>%
+  ggplot() + 
+  geom_point(aes(x = mw_imp, y = indexwaarde)) + 
+  geom_ribbon(data = q90results_6230 %>%
+                mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))), 
+              aes(x = x, group = afkorting,
+                  ymin = q90_lwr * 2 - 1, 
+                  ymax = q90_upr * 2 - 1), alpha = 0.2) +
+  geom_line(data = q90results_6230 %>%
+              mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))), 
+              aes(x = x, group = afkorting,
+                  y = q90_median * 2 - 1)) +
+  geom_vline(data = xintercepts_6230 %>%
+               mutate(welke_index = factor(welke_index, 
+                             levels = c("index_p0", "index_pmin1"),
+                             labels = c("meetkundig gemiddelde", 
+                                        "harmonisch gemiddelde"))), 
+             aes(xintercept = x), colour = "red") +
+  geom_hline(yintercept = 0, colour = "red") + 
+  scale_y_continuous("Kwaliteitsindex", limits = c(-1,1)) + 
+  facet_grid(welke_index ~ afkorting, scales = "free")
+
+```
+
+
+-->
+
+
+
+## Opmerkingen
+
+- variabelen zoals GxG's waarvoor er lange tijdsreeksen zijn, gebruiken we misschien beter een methodiek die de normen bepaalt op basis  van deze tijdsreeksen. We sluiten hiervoor best aan bij het werk dat al gebeurd is voor MNM? Misschien is dit ook interessant: https://github.com/ThomasOpitz/inla-goes-extreme/ en https://arxiv.org/pdf/1802.01085.pdf
+- 
+
+
+
